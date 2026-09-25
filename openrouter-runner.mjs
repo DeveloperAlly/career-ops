@@ -67,7 +67,28 @@ const OPENROUTER_API_URL    = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const MAX_TOKENS            = 8192;
 const RATE_LIMIT_DELAY_MS   = 2500;  // pause between requests on free tier
-const MODEL_TIMEOUT_MS      = 15_000; // abort a single model call after 15 s
+const DEFAULT_MODEL_TIMEOUT_MS = 15_000; // abort a single model call after 15 s
+
+/**
+ * Per-call model timeout, overridable with OPENROUTER_TIMEOUT_MS (milliseconds).
+ * Read at call time, not at import: .env is only loaded when this file is the
+ * CLI entry point (see loadEnvFile), after module constants are evaluated.
+ * An unset, empty, or invalid value (not a positive integer, or above
+ * setTimeout's 2^31-1 ms ceiling, which would fire immediately) falls back to
+ * the default.
+ * @param {Record<string, string|undefined>} [env=process.env]
+ * @returns {number} Timeout in milliseconds.
+ */
+export function resolveModelTimeoutMs(env = process.env) {
+  const raw = env.OPENROUTER_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_MODEL_TIMEOUT_MS;
+  const ms = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isSafeInteger(ms) || ms <= 0 || ms > 2_147_483_647) {
+    console.warn(`[config] Ignoring invalid OPENROUTER_TIMEOUT_MS="${raw}" (expected a positive integer, in ms); using ${DEFAULT_MODEL_TIMEOUT_MS}.`);
+    return DEFAULT_MODEL_TIMEOUT_MS;
+  }
+  return ms;
+}
 
 // Provider priority order — models are sorted by provider prefix, not hardcoded names.
 // Add, remove, or reorder providers here; model names are resolved at runtime from the API.
@@ -229,6 +250,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
     );
   }
 
+  const modelTimeoutMs = resolveModelTimeoutMs();
   const pinnedModel = process.env.CAREER_OPS_MODEL;
   if (pinnedModel) {
     activeModel = pinnedModel;
@@ -242,7 +264,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       max_tokens: MAX_TOKENS,
     });
     const ctrl = new AbortController();
-    const timerId = setTimeout(() => ctrl.abort(), MODEL_TIMEOUT_MS);
+    const timerId = setTimeout(() => ctrl.abort(), modelTimeoutMs);
     try {
       const resp = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
@@ -267,7 +289,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const usage = normalizeOpenAIUsage(data.usage);
       return { content, usage };
     } catch (e) {
-      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${MODEL_TIMEOUT_MS / 1000}s`);
+      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${modelTimeoutMs / 1000}s`);
       throw e;
     } finally {
       clearTimeout(timerId);
@@ -302,7 +324,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       });
 
       const controller = new AbortController();
-      const timerId = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+      const timerId = setTimeout(() => controller.abort(), modelTimeoutMs);
       let data;
       try {
         const resp = await fetch(OPENROUTER_API_URL, {
@@ -322,7 +344,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
         }
         data = await resp.json();
       } catch (e) {
-        if (e.name === 'AbortError') throw new Error(`Timeout after ${MODEL_TIMEOUT_MS / 1000}s`);
+        if (e.name === 'AbortError') throw new Error(`Timeout after ${modelTimeoutMs / 1000}s`);
         throw e;
       } finally {
         clearTimeout(timerId);
@@ -913,6 +935,7 @@ MODEL SELECTION:
   - Free models are fetched automatically via the OpenRouter API at runtime.
   - They are tried in sequence; if one fails the next is used automatically.
   - Pin a model:  CAREER_OPS_MODEL=deepseek/deepseek-r1:free node openrouter-runner.mjs eval <url>
+  - Per-call timeout: OPENROUTER_TIMEOUT_MS=60000 (milliseconds, default 15000)
 `);
 }
 
