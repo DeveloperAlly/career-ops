@@ -501,6 +501,14 @@ node openrouter-runner.mjs help              # Show this help
 3. Free API key: https://openrouter.ai
 ```
 
+**Per-call timeout:** each model call is aborted after 15 seconds by default. Large prompts on slow free-tier or reasoning models can need longer; raise it in `.env`:
+
+```dotenv
+OPENROUTER_TIMEOUT_MS=60000   # milliseconds; unset or invalid keeps the 15000 default
+```
+
+In free-model rotation, a model that times out is blacklisted and remembered in `data/model-blacklist.json`. After raising the timeout, delete that file to give those models another try.
+
 ### Path B: Fully Local with Ollama (`ollama:eval`)
 
 If you want **zero network calls** and complete privacy, run evaluations against a local Ollama instance:
