@@ -74,13 +74,24 @@ Unknown subcommands fall through to `docker compose exec` so anything works:
 ## API keys
 
 Drop your keys in `.env` at the project root or export them in the shell that
-runs `./cops`. The compose file forwards `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`,
-and `OPENAI_API_KEY` into the container.
+runs `./cops`. The compose file forwards these into the container (unset ones
+arrive empty, which every script treats as unset):
+
+- Keys: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`
+- Model / endpoint: `OPENAI_BASE_URL`, `OPENAI_MODEL`, `CAREER_OPS_MODEL`, `OPENROUTER_TIMEOUT_MS`
+- Data location: `CAREER_OPS_DATA_DIR` (see below)
 
 ```bash
 echo "GEMINI_API_KEY=..." >> .env
 ./cops gemini:eval
 ```
+
+**`CAREER_OPS_DATA_DIR` is resolved inside the container**, relative to `/app`
+(the project root), and only the project directory is mounted. So a path inside
+the project works (`CAREER_OPS_DATA_DIR=my-data`), but one outside it
+(`../career-ops-data`, or an absolute host path you use for native runs) does not
+exist in the container. For data outside the project, add a volume for it in
+`docker-compose.yml` and set `CAREER_OPS_DATA_DIR` to the container-side path.
 
 ## Data persistence
 
@@ -114,8 +125,18 @@ container's. Always go through `./cops`.
 **Permission errors on generated files** — the container runs as root by
 default. If host files end up root-owned, either:
 - run `sudo chown -R "$USER" .` once, or
-- add `user: "${UID}:${GID}"` to `docker-compose.yml` (export `UID`/`GID`
-  in your shell first).
+- uncomment `user: "${UID:-1000}:${GID:-1000}"` in `docker-compose.yml` to run
+  as your host user. Export the IDs first (`export UID GID=$(id -g)`; bash sets
+  `UID` but does not export it, and sets no `GID`), otherwise both default to
+  `1000`. Caveats, which is why it stays opt-in:
+  - UID `1000` is normally the image's `pwuser`, which has a home directory.
+    Any other UID has no account in the image, so `HOME` becomes `/` and npm,
+    Go and Chromium cannot write their caches or profiles. Add `HOME=/tmp` to
+    `environment:` if you hit this.
+  - The `node_modules` volume is populated as root at build time, so
+    `./cops npm install` fails as a non-root user. Use `./cops rebuild` after
+    dependency changes instead.
+  - Files already created as root must be `chown`ed back once before switching.
 
 **Slow first build** — base image is ~1.5 GB. Subsequent builds reuse layers
 and finish in seconds.

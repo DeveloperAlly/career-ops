@@ -9,6 +9,11 @@ services:
     # Long-running shell so `docker compose exec` is instant.
     command: ["tail", "-f", "/dev/null"]
     init: true
+    # Optional: run as your host user so generated files are not root-owned.
+    # Off by default (see DOCKER.md, "Permission errors"): the image's
+    # node_modules volume is root-owned, and a UID with no passwd entry in the
+    # image gets HOME=/, which breaks npm/go caches and Chromium profiles.
+    # user: "${UID:-1000}:${GID:-1000}"
     # Mount whole project so edits on host are visible inside the container.
     # node_modules is kept inside the image to avoid host/container ABI mismatch
     # (host is ubuntu26.04 where playwright won't install; image is jammy).
@@ -22,6 +27,14 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # Model / endpoint selection for openai-eval.mjs and openrouter-runner.mjs.
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - CAREER_OPS_MODEL=${CAREER_OPS_MODEL:-}
+      - OPENROUTER_TIMEOUT_MS=${OPENROUTER_TIMEOUT_MS:-}
+      # Resolved INSIDE the container, relative to /app (see DOCKER.md).
+      - CAREER_OPS_DATA_DIR=${CAREER_OPS_DATA_DIR:-}
     # Chromium needs a larger /dev/shm than the default 64M.
     shm_size: "1gb"
     # Dashboard TUI is interactive; expose nothing by default but allow `-it`.
